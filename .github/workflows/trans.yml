@@ -1,0 +1,168 @@
+name: trans
+
+on:
+  workflow_dispatch:
+     inputs:
+       mode:
+         description: 'Download mode(aria2c,curl,axel,wget)'
+         required: true
+         default: 'aria2c'
+       output:
+         description: 'Output(wget=O)'
+         required: true
+         default: 'o'
+       filename:
+         description: 'ROM NAME(Optional)'
+       filelink:
+         description: 'ROM LINK(Support gdrive link)'
+         required: true
+       release:
+         description: 'Upload ROM to Release(Please set the token)'
+         required: true
+         default: 'true'
+       anon:
+         description: 'Upload ROM to Anonfile'
+         required: true
+         default: 'true'
+       we:
+         description: 'Upload ROM to WeTransfer'
+         required: true
+         default: 'true'
+       muse:
+         description: 'Upload ROM to MuseTransfer'
+         required: true
+         default: 'true'
+       flags:
+         description: 'Flags(Default)'
+         required: true
+         default: 'true'
+
+jobs:
+  a1to5x:
+    runs-on: ubuntu-20.04
+    continue-on-error: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Initialization environment
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y git wget curl aria2 python python3 python3-setuptools unzip axel cpio file
+          pip3 install protobuf
+          pip3 install gdown
+
+      - id: var
+        name: Download
+        run: |
+          echo "Download"
+          if [[ ${{ github.event.inputs.filelink }} == *"drive.google.com"* ]]; then
+              if [[ ${{ github.event.inputs.filelink }} == *"file"* ]]; then
+                  DOWNLOAD_LINK=$(echo ${{ github.event.inputs.filelink }} | cut -d / -f 6)
+                  echo "DOWNLOAD_LINK: $DOWNLOAD_LINK"
+                  gdown https://drive.google.com/uc?id=${DOWNLOAD_LINK}
+              elif [[ ${{ github.event.inputs.filelink }} == *"id"* ]]; then
+                  DOWNLOAD_LINK1=$(echo ${{ github.event.inputs.filelink }} | cut -d = -f 2 | cut -d '&' -f 1)
+                  DOWNLOAD_LINK2=$(echo ${{ github.event.inputs.filelink }} | cut -d = -f 4)
+                  echo "DOWNLOAD_LINK1: $DOWNLOAD_LINK1"
+                  echo "DOWNLOAD_LINK2: $DOWNLOAD_LINK2"
+                  gdown https://drive.google.com/uc?id=${DOWNLOAD_LINK1} || gdown https://drive.google.com/uc?id=${DOWNLOAD_LINK2}
+              fi
+          else
+              if [[ ! -z "${{ github.event.inputs.filename }}" ]]; then
+                  FILENAME="${{ github.event.inputs.filename }}"
+                  ${{ github.event.inputs.mode }} ${{ github.event.inputs.filelink }} -${{ github.event.inputs.output }} "$FILENAME"
+              else
+                  ${{ github.event.inputs.mode }} ${{ github.event.inputs.filelink }}
+              fi
+          fi
+          ls
+          FILENAME="$(find . -size +100M -exec ls -lS {} \+ | head -1 | awk '{print $9}')"
+          if [[ -z "$FILENAME" ]]; then
+              exit 1
+              echo "The file was not downloaded successfully"
+          fi 
+          echo "FILENAME: $FILENAME"
+          FILENAME=$(basename ${FILENAME})
+          NAME=$(basename $FILENAME .zip)
+          echo "::set-output name=filename::$FILENAME"
+          echo "::set-output name=name::$NAME"
+
+  
+        
+                
+
+      - name: Upload ROM to Artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: output
+          path: |
+            output
+          retention-days: 7
+
+      - name: Upload ROM to Anonfile
+        if: github.event.inputs.anon == 'true'
+        continue-on-error: true
+        run: |
+          echo "Upload ROM to Anonfile"
+          curl -fsSL git.io/file-transfer | sh
+          anontrans=$(./transfer anon --no-progress ${{ steps.var.outputs.filename }})
+          anontrans=$(echo $anontrans | grep -o -E "https[^ ]*")
+          echo "Anonfile: $anontrans"
+          echo "- [ ] Anonfile:" >> boby.txt
+          echo "     - $anontrans" >> boby.txt
+
+      - name: Upload ROM to WeTransfer
+        if: github.event.inputs.we == 'true'
+        continue-on-error: true
+        run: |
+          echo "Upload to WeTransfer"
+          curl -fsSL git.io/file-transfer | sh
+          wetrans=$(./transfer wet -s -p 16 --no-progress ${{ steps.var.outputs.filename }})
+          wetrans=$(echo $wetrans | grep -o -E "https[^ ]*")
+          echo "WeTransfer: $wetrans"
+          echo "- [ ] WeTransfer(Valid for seven days):" >> boby.txt
+          echo "     - $wetrans" >> boby.txt
+
+      - name: Upload ROM to MuseTransfer
+        if: github.event.inputs.muse == 'true'
+        continue-on-error: true
+        run: |
+          echo "Upload to MuseTransfer"
+          curl -fsSL git.io/file-transfer | sh
+          musetrans=$(./transfer muse -s -p 12 --no-progress ${{ steps.var.outputs.filename }})
+          musetrans=$(echo $musetrans | grep -o -E "https[^ ]*")
+          echo "MuseTransfer: $musetrans"
+          echo "- [ ] MuseTransfer(Valid for seven days):" >> boby.txt
+          echo "     - $musetrans" >> boby.txt
+          MD5SUM=$(md5sum ${{ steps.var.outputs.filename }} | cut -d' ' -f1)
+          SHA1SUM=$(sha1sum ${{ steps.var.outputs.filename }} | cut -d' ' -f1)
+          SHA256SUM=$(sha256sum ${{ steps.var.outputs.filename }} | cut -d' ' -f1)
+          echo "MD5SUM: $MD5SUM"
+          echo "SHA1SUM: $SHA1SUM"
+          echo "SHA256SUM: $SHA256SUM"
+          echo "" >> boby.txt
+          echo "> **Verify:**" >> boby.txt
+          echo "" >> boby.txt
+          echo "- [ ] MD5SUM:" >> boby.txt
+          echo "" >> boby.txt
+          echo "      $MD5SUM" >> boby.txt
+          echo "- [ ] SHA1SUM:" >> boby.txt
+          echo "" >> boby.txt
+          echo "      $SHA1SUM" >> boby.txt
+          echo "- [ ] SHA256SUM:" >> boby.txt
+          echo "" >> boby.txt
+          echo "      $SHA256SUM" >> boby.txt
+          echo "" >> boby.txt
+
+      - name: Upload ROM to Release
+        if: github.event.inputs.release == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ steps.var.outputs.filename }}
+          name: ${{ steps.var.outputs.name }}
+          tag_name: ${{ github.run_id }}
+          body_path: boby.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE }}
